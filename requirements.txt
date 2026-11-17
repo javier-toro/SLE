@@ -1,0 +1,6 @@
+numpy==2.5.5
+matplotlib==3.11.2
+shapely==2.2.0
+cupy-cuda13x[ctk]==14.2.0
+jupyterlab==4.6.6
+ipykernel==7.4.0
