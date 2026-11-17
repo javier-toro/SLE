@@ -5,7 +5,6 @@ import ctypes
 import json
 import os
 from pathlib import Path
-import sqlite3
 import time
 
 ROOT = Path(__file__).resolve().parent
@@ -80,27 +79,70 @@ def curve_statistics(curve):
     return int(simple), float(curve.imag.max()), float(np.ptp(curve.real)), float(curve[-1].real), float(curve[-1].imag)
 
 
-def export_csv(connection, destination):
-    """Only export complete sample prefixes. Replace the CSV atomically."""
+CHECKPOINT_COLUMNS = ('seed', 'simple', 'height', 'width', 'x', 'y', 'seconds')
+
+
+class Progress:
+    def __init__(self, path):
+        self.path = path
+        self.count = 0
+        self.totals = (0, 0.0, 0.0, 0.0, 0.0)
+        self.prefixes = {}
+        if not path.exists():
+            return
+        with path.open('r+b') as handle:
+            while True:
+                offset = handle.tell()
+                line = handle.readline()
+                if not line:
+                    break
+                if not line.endswith(b'\n'):
+                    handle.truncate(offset)
+                    break
+                values = line.decode('ascii').strip().split(',')
+                if offset == 0:
+                    if tuple(values) != CHECKPOINT_COLUMNS:
+                        raise ValueError(f'Cabecera inesperada en {path}')
+                    continue
+                if len(values) != len(CHECKPOINT_COLUMNS) or int(values[0]) != self.count:
+                    raise ValueError(f'Semilla inesperada en {path}: se esperaba {self.count}')
+                self.record((int(values[1]), *map(float, values[2:6])))
+
+    def record(self, stats):
+        self.count += 1
+        self.totals = tuple(total + value for total, value in zip(self.totals, stats))
+        if self.count in MS:
+            self.prefixes[self.count] = self.totals
+
+    def append(self, stats, seconds):
+        with self.path.open('a', encoding='ascii', newline='') as handle:
+            writer = csv.writer(handle, lineterminator='\n')
+            if handle.tell() == 0:
+                writer.writerow(CHECKPOINT_COLUMNS)
+            writer.writerows((seed, *row, seconds)
+                             for seed, row in enumerate(stats, start=self.count))
+        for row in stats:
+            self.record(row)
+
+
+def export_csv(progress, destination):
+    """Export completed sample prefixes and replace the summary atomically."""
     temporary = destination.with_suffix('.tmp')
     with temporary.open('w', newline='', encoding='utf-8') as handle:
         writer = csv.writer(handle)
         writer.writerow(['kind', 'kappa_or_Kmax', 'f', 'phase_pi_over_2', 'N', 'T', 'M',
                          'simple_count', 'proportion', 'wilson_low', 'wilson_high',
                          'mean_height', 'mean_width', 'mean_final_real', 'mean_final_imag'])
-        for key, count in connection.execute('SELECT config, COUNT(*) FROM samples GROUP BY config'):
-            for m in MS:
-                if m > count:
-                    break
-                row = connection.execute('SELECT COUNT(*), SUM(simple), AVG(height), AVG(width), AVG(x), AVG(y) FROM samples WHERE config=? AND seed<?', (key, m)).fetchone()
-                if row[0] != m:
-                    continue
-                p = row[1] / m
+        for config in sorted(progress):
+            for m, totals in progress[config].prefixes.items():
+                simple, *geometry = totals
+                p = simple / m
                 z = 1.959963984540054
                 denominator = 1 + z*z/m
                 center = (p + z*z/(2*m))/denominator
                 half = z*np.sqrt(p*(1-p)/m + z*z/(4*m*m))/denominator
-                writer.writerow([*json.loads(key), 1, m, row[1], p, center-half, center+half, *row[2:]])
+                writer.writerow([*config, 1, m, simple, p, center-half, center+half,
+                                 *(total / m for total in geometry)])
     os.replace(temporary, destination)
 
 
@@ -116,9 +158,6 @@ def run(output=ROOT / 'resultados' / 'recalculo', max_m=100_000, batch_size=16, 
     except OSError:
         lock.close()
         raise RuntimeError('Ya hay una simulacion activa en esta carpeta.')
-    connection = sqlite3.connect(output / 'trayectorias.sqlite')
-    connection.execute('PRAGMA journal_mode=WAL')
-    connection.execute('CREATE TABLE IF NOT EXISTS samples (config TEXT, seed INTEGER, simple INTEGER, height REAL, width REAL, x REAL, y REAL, seconds REAL, PRIMARY KEY(config,seed))')
     if configs is None:
         configs = configuraciones_principales()
     started = time.time()
@@ -127,26 +166,37 @@ def run(output=ROOT / 'resultados' / 'recalculo', max_m=100_000, batch_size=16, 
     print(json.dumps({'pid': os.getpid(), 'configurations': len(configs), 'max_m': max_m,
                       'batch_size': batch_size, 'sleep_prevention': bool(awake)}), flush=True)
     try:
-        for start in range(0, max_m, batch_size):
-            size = min(batch_size, max_m-start)
-            brownian = brownian_batch(start, size)
+        checkpoints = output / 'trayectorias'
+        checkpoints.mkdir(exist_ok=True)
+        # Keep summaries for configurations saved by earlier runs, including extras.
+        progress = {}
+        for path in checkpoints.glob('*.csv'):
+            kind, k, f, phase, n = path.stem.split('_')
+            config = (kind, float(k), int(f), int(phase), int(n))
+            progress[config] = Progress(path)
+        for config in configs:
+            if config not in progress:
+                filename = '_'.join(map(str, config)) + '.csv'
+                progress[config] = Progress(checkpoints / filename)
+
+        def save_summary():
+            export_csv(progress, output / 'resumen.csv')
+
+        first_seed = min(progress[config].count for config in configs)
+        for start in range(first_seed, max_m, batch_size):
+            end = min(start + batch_size, max_m)
+            brownian = brownian_batch(start, end - start)
             for config in configs:
-                key = json.dumps(config)
-                existing = {row[0] for row in connection.execute('SELECT seed FROM samples WHERE config=? AND seed>=? AND seed<?', (key, start, start+size))}
-                missing = [i for i in range(size) if start+i not in existing]
-                if not missing:
+                saved = progress[config]
+                if saved.count >= end:
                     continue
                 tick = time.perf_counter()
-                curves = curves_cuda(driving_increments(brownian[missing], config))
+                curves = curves_cuda(driving_increments(brownian[saved.count - start:], config))
                 stats = [curve_statistics(curve) for curve in curves]
-                elapsed = time.perf_counter()-tick
-                with connection:
-                    connection.executemany('INSERT INTO samples VALUES (?,?,?,?,?,?,?,?)',
-                        [(key, start+i, *stat, elapsed/len(missing)) for i, stat in zip(missing, stats)])
-            if (start // 1000 != (start + size) // 1000 or
-                    any(start < m <= start + size for m in MS) or start + size == max_m):
-                export_csv(connection, output / 'resumen.csv')
-            status = {'completed_per_configuration': start+size, 'target': max_m,
+                saved.append(stats, (time.perf_counter() - tick) / len(stats))
+            if start // 1000 != end // 1000 or any(start < m <= end for m in MS):
+                save_summary()
+            status = {'completed_per_configuration': end, 'target': max_m,
                       'configurations': len(configs), 'elapsed_seconds_this_run': time.time()-started,
                       'updated': time.strftime('%Y-%m-%d %H:%M:%S'), 'pid': os.getpid()}
             temp = output / 'estado.tmp'
@@ -154,12 +204,12 @@ def run(output=ROOT / 'resultados' / 'recalculo', max_m=100_000, batch_size=16, 
             os.replace(temp, output / 'estado.json')
             print(json.dumps(status), flush=True)
             if (output / 'STOP').exists():
-                export_csv(connection, output / 'resumen.csv')
+                save_summary()
                 print('Detenido en un punto de control. Retira STOP para reanudar.', flush=True)
                 return
+        save_summary()
         print('SIMULACIONES COMPLETADAS', flush=True)
     finally:
-        connection.close()
         ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
         lock.close()
 

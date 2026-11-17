@@ -36,6 +36,6 @@ Abre notebook/SLE.ipynb desde JupyterLab. Las figuras guardadas en el cuaderno s
 .\.venv\Scripts\python.exe simulaciones.py --extras
 ~~~
 
-Por defecto, el script guarda el recálculo en resultados/recalculo. SQLite registra cada resultado por semilla y configuración. Para reanudar una ejecución, repite el mismo comando y usa la misma carpeta de salida. Puedes crear un archivo vacío llamado STOP en esa carpeta para detener el cálculo al final del lote actual. Retíralo antes de reanudar.
+Por defecto, el script guarda el recálculo en resultados/recalculo. La carpeta trayectorias contiene un CSV por configuración con una fila por semilla. El archivo resumen.csv agrega las métricas para los tamaños de muestra completos. Para reanudar una ejecución, repite el mismo comando y usa la misma carpeta de salida. Puedes crear un archivo vacío llamado STOP en esa carpeta para detener el cálculo al final del lote actual. Retíralo antes de reanudar.
 
-Esta copia del proyecto incluye los resúmenes exportados. Un recálculo iniciado en el Escritorio crea su propia base SQLite.
+Esta copia del proyecto incluye los resúmenes exportados. Un recálculo crea sus propios CSV de trayectorias.
