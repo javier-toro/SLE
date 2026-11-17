@@ -39,7 +39,3 @@ Abre notebook/SLE.ipynb desde JupyterLab. Las figuras guardadas en el cuaderno s
 Por defecto, el script guarda el recálculo en resultados/recalculo. SQLite registra cada resultado por semilla y configuración. Para reanudar una ejecución, repite el mismo comando y usa la misma carpeta de salida. Puedes crear un archivo vacío llamado STOP en esa carpeta para detener el cálculo al final del lote actual. Retíralo antes de reanudar.
 
 Esta copia del proyecto incluye los resúmenes exportados. Un recálculo iniciado en el Escritorio crea su propia base SQLite.
-
-## Cómo leer las proporciones
-
-Los tamaños de muestra reutilizan prefijos de las mismas semillas. Cada proporción mide cuántas poligonales discretizadas pasan la comprobación de simplicidad de Shapely. Para reproducir una figura con un nuevo recálculo, cambia la ruta del CSV en la sección de resultados del notebook.
