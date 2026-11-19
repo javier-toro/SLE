@@ -9,7 +9,6 @@ El proyecto compara la proporción de poligonales simples en el modelo clásico 
 - **[resultados/resumen.csv](resultados/resumen.csv)** contiene una copia del resumen exportado. Los experimentos principales llegaron a 100.000 trayectorias por combinación.
 - **[resultados/graficos/Indice.html](resultados/graficos/Indice.html)** reúne las figuras exportadas. Las figuras de los extras pueden corresponder a un avance parcial.
 - **[resultados/animaciones/](resultados/animaciones)** contiene los MP4, los HTML de reproducción y los datos de ejemplo.
-- **[resultados/presentacion/](resultados/presentacion)** contiene el PDF Beamer y su ZIP de Overleaf. Las animaciones del PDF se reproducen en un visor compatible con el paquete animate.
 
 ## Instalar y ejecutar
 
