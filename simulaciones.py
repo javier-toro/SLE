@@ -46,6 +46,7 @@ def driving_increments(brownian, config):
     return weighted.reshape(len(brownian), n, FINE_N // n).sum(axis=2)
 
 
+# Este codigo de paralelizacion con CUDA fue desarrollado con ayuda de IA.
 KERNEL = cp.RawKernel(r'''
 #include <cupy/complex.cuh>
 extern "C" __global__ void curves(const double* increments, int n,
